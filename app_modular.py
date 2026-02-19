@@ -41,6 +41,33 @@ for key, default in [
 
 # En-tete
 ui_components.display_header()
+# CSS global : onglets plus grands et lisibles
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap');
+.stTabs [data-baseweb="tab-list"] {
+  gap: 4px; background: #f1f5f9; padding: 6px;
+  border-radius: 12px; border: 1px solid #e2e8f0;
+}
+.stTabs [data-baseweb="tab"] {
+  font-family: 'DM Sans', sans-serif !important;
+  font-size: 14px !important; font-weight: 500 !important;
+  color: #475569 !important; padding: 10px 18px !important;
+  border-radius: 8px !important; border: none !important;
+  background: transparent !important; white-space: nowrap !important;
+}
+.stTabs [data-baseweb="tab"]:hover { background: #ffffff !important; color: #1e293b !important; }
+.stTabs [aria-selected="true"] {
+  background: #ffffff !important; color: #1e6fe8 !important;
+  font-weight: 600 !important; box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
+}
+.stTabs [data-baseweb="tab-highlight"] { display: none !important; }
+.stTabs [data-baseweb="tab-border"]    { display: none !important; }
+section[data-testid="stSidebar"] { background: #ffffff; border-right: 1px solid #e2e8f0; }
+.stApp { background: #f4f6f9; }
+</style>
+""", unsafe_allow_html=True)
+
 
 # Auth Supabase
 if st.session_state.logged_in and st.session_state.access_token:
