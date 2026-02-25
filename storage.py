@@ -1,83 +1,88 @@
 """
 Module de gestion du stockage des fichiers (logos, documents) dans Supabase Storage
+Modification : upload_document_projet accepte tous les types de fichiers (détection MIME dynamique)
 """
 import streamlit as st
 from datetime import datetime
 import os
+import mimetypes
+
+
+# ── Table des types MIME courants (complète mimetypes si nécessaire) ──
+_MIME_MAP = {
+    # Documents
+    "pdf":  "application/pdf",
+    "doc":  "application/msword",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "xls":  "application/vnd.ms-excel",
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "ppt":  "application/vnd.ms-powerpoint",
+    "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "txt":  "text/plain",
+    "csv":  "text/csv",
+    "rtf":  "application/rtf",
+    # Images
+    "png":  "image/png",
+    "jpg":  "image/jpeg",
+    "jpeg": "image/jpeg",
+    "gif":  "image/gif",
+    "webp": "image/webp",
+    "svg":  "image/svg+xml",
+    "tiff": "image/tiff",
+    "bmp":  "image/bmp",
+    # Archives
+    "zip":  "application/zip",
+    "rar":  "application/x-rar-compressed",
+    "7z":   "application/x-7z-compressed",
+    # Autres
+    "json": "application/json",
+    "xml":  "application/xml",
+    "dwg":  "application/acad",
+    "dxf":  "application/dxf",
+}
+
+
+def _get_content_type(filename: str) -> str:
+    """Détecte le type MIME depuis l'extension du fichier."""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext in _MIME_MAP:
+        return _MIME_MAP[ext]
+    # Fallback : laisser mimetypes Python deviner
+    guessed, _ = mimetypes.guess_type(filename)
+    return guessed or "application/octet-stream"
 
 
 def upload_logo(supabase, logo_file, entreprise_id):
     """
-    Upload un logo dans Supabase Storage et retourne l'URL publique
-    
-    Args:
-        supabase: Client Supabase
-        logo_file: Fichier uploadé (UploadedFile de Streamlit)
-        entreprise_id: ID de l'entreprise
-        
-    Returns:
-        str: URL publique du logo ou None en cas d'erreur
+    Upload un logo dans Supabase Storage et retourne l'URL publique.
     """
     try:
-        # Lire le contenu du fichier
-        file_bytes = logo_file.read()
-        
-        # Générer un nom de fichier unique
+        file_bytes     = logo_file.read()
         file_extension = logo_file.name.split('.')[-1].lower()
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        file_name = f"logo_{entreprise_id}_{timestamp}.{file_extension}"
-        
-        # Déterminer le content type
-        content_type_map = {
-            'png': 'image/png',
-            'jpg': 'image/jpeg',
-            'jpeg': 'image/jpeg',
-            'gif': 'image/gif',
-            'webp': 'image/webp'
-        }
-        content_type = content_type_map.get(file_extension, 'image/jpeg')
-        
-        # Upload dans le bucket 'logos'
-        # Note: Le bucket 'logos' doit être créé dans Supabase Storage avec accès public
-        response = supabase.storage.from_('logos').upload(
+        timestamp      = datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_name      = f"logo_{entreprise_id}_{timestamp}.{file_extension}"
+        content_type   = _get_content_type(logo_file.name)
+
+        supabase.storage.from_('logos').upload(
             path=file_name,
             file=file_bytes,
             file_options={"content-type": content_type, "upsert": "true"}
         )
-        
-        # Obtenir l'URL publique
-        public_url = supabase.storage.from_('logos').get_public_url(file_name)
-        
-        return public_url
-        
+        return supabase.storage.from_('logos').get_public_url(file_name)
+
     except Exception as e:
         st.error(f"❌ Erreur lors de l'upload du logo : {str(e)}")
         return None
 
 
 def delete_logo(supabase, logo_url):
-    """
-    Supprime un logo du storage Supabase
-    
-    Args:
-        supabase: Client Supabase
-        logo_url: URL du logo à supprimer
-        
-    Returns:
-        bool: True si suppression réussie, False sinon
-    """
+    """Supprime un logo du storage Supabase."""
     try:
-        # Extraire le nom du fichier de l'URL
-        # Format: https://xxxxx.supabase.co/storage/v1/object/public/logos/logo_123_20240101.png
         if '/logos/' in logo_url:
             file_name = logo_url.split('/logos/')[-1]
-            
-            # Supprimer le fichier
             supabase.storage.from_('logos').remove([file_name])
             return True
-        
         return False
-        
     except Exception as e:
         st.warning(f"⚠️ Erreur lors de la suppression du logo : {str(e)}")
         return False
@@ -85,36 +90,25 @@ def delete_logo(supabase, logo_url):
 
 def upload_document_projet(supabase, document_file, entreprise_id=None):
     """
-    Upload un document de projet dans Supabase Storage
-    
-    Args:
-        supabase: Client Supabase
-        document_file: Fichier uploadé (PDF)
-        entreprise_id: ID de l'entreprise (optionnel)
-        
-    Returns:
-        str: URL publique du document ou None en cas d'erreur
+    Upload un document de projet dans Supabase Storage.
+    Accepte tous les types de fichiers — le type MIME est détecté automatiquement.
     """
     try:
-        file_bytes = document_file.read()
-        
-        # Générer un nom de fichier unique
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        prefix = f"projet_{entreprise_id}_" if entreprise_id else "projet_"
-        file_name = f"{prefix}{timestamp}.pdf"
-        
-        # Upload dans le bucket 'documents'
-        response = supabase.storage.from_('documents').upload(
+        file_bytes   = document_file.read()
+        timestamp    = datetime.now().strftime("%Y%m%d_%H%M%S")
+        # Conserver l'extension d'origine dans le nom stocké
+        original_ext = document_file.name.rsplit(".", 1)[-1] if "." in document_file.name else "bin"
+        prefix       = f"projet_{entreprise_id}_" if entreprise_id else "projet_"
+        file_name    = f"{prefix}{timestamp}.{original_ext}"
+        content_type = _get_content_type(document_file.name)
+
+        supabase.storage.from_('documents').upload(
             path=file_name,
             file=file_bytes,
-            file_options={"content-type": "application/pdf", "upsert": "true"}
+            file_options={"content-type": content_type, "upsert": "true"}
         )
-        
-        # Obtenir l'URL publique
-        public_url = supabase.storage.from_('documents').get_public_url(file_name)
-        
-        return public_url
-        
+        return supabase.storage.from_('documents').get_public_url(file_name)
+
     except Exception as e:
         st.warning(f"⚠️ Erreur lors de l'upload du document : {str(e)}")
         return None
@@ -122,36 +116,24 @@ def upload_document_projet(supabase, document_file, entreprise_id=None):
 
 def upload_soumission(supabase, document_file, entreprise_id=None):
     """
-    Upload un document de soumission dans Supabase Storage
-    
-    Args:
-        supabase: Client Supabase
-        document_file: Fichier uploadé (PDF)
-        entreprise_id: ID de l'entreprise (optionnel)
-        
-    Returns:
-        str: URL publique du document ou None en cas d'erreur
+    Upload un document de soumission dans Supabase Storage.
+    Accepte tous les types de fichiers — le type MIME est détecté automatiquement.
     """
     try:
-        file_bytes = document_file.read()
-        
-        # Générer un nom de fichier unique
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        prefix = f"soumission_{entreprise_id}_" if entreprise_id else "soumission_"
-        file_name = f"{prefix}{timestamp}.pdf"
-        
-        # Upload dans le bucket 'soumissions'
-        response = supabase.storage.from_('soumissions').upload(
+        file_bytes   = document_file.read()
+        timestamp    = datetime.now().strftime("%Y%m%d_%H%M%S")
+        original_ext = document_file.name.rsplit(".", 1)[-1] if "." in document_file.name else "bin"
+        prefix       = f"soumission_{entreprise_id}_" if entreprise_id else "soumission_"
+        file_name    = f"{prefix}{timestamp}.{original_ext}"
+        content_type = _get_content_type(document_file.name)
+
+        supabase.storage.from_('soumissions').upload(
             path=file_name,
             file=file_bytes,
-            file_options={"content-type": "application/pdf", "upsert": "true"}
+            file_options={"content-type": content_type, "upsert": "true"}
         )
-        
-        # Obtenir l'URL publique
-        public_url = supabase.storage.from_('soumissions').get_public_url(file_name)
-        
-        return public_url
-        
+        return supabase.storage.from_('soumissions').get_public_url(file_name)
+
     except Exception as e:
         st.warning(f"⚠️ Erreur lors de l'upload de la soumission : {str(e)}")
         return None

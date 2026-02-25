@@ -25,7 +25,7 @@ def signup_form():
                     "01000 - Entrepreneur général",
                     "99000 - Autre (préciser dans le profil)"
                 ],
-                default=["16200 - Électricité"],
+                default=[],
                 help="Sélectionnez toutes les spécialités que vous exercez en résidentiel et/ou commercial"
             )
             adresse = st.text_input("Adresse")

@@ -1,26 +1,33 @@
 """
 Module de génération d'offres complètes
+Modification : upload multi-documents, tous types de fichiers
 """
 import streamlit as st
-from pypdf import PdfReader
 from datetime import datetime
 import json
 import re
 from llm_manager import LLMManager
+from extracteur import (
+    extraire_texte_multiple,
+    feedback_fichiers,
+    LABEL_UPLOAD,
+    HELP_UPLOAD,
+    TYPES_ACCEPTES,
+)
 import database
 
 
 llm_manager = LLMManager()
 
 
-def extraire_exigences_appel_offre(texte_pdf):
-    """Extrait les exigences clés d'un appel d'offres"""
+def extraire_exigences_appel_offre(texte_combine: str) -> dict:
+    """Extrait les exigences clés d'un ou plusieurs documents d'appel d'offres"""
     try:
         prompt = f"""
 Analyse cet appel d'offres et extrais les exigences clés en format JSON strict.
 
 DOCUMENT :
-{texte_pdf[:8000]}
+{texte_combine[:8000]}
 
 Réponds UNIQUEMENT avec un objet JSON (sans markdown, sans ```json) :
 {{
@@ -38,9 +45,8 @@ Réponds UNIQUEMENT avec un objet JSON (sans markdown, sans ```json) :
     "documents_requis": ["doc 1", "doc 2"]
 }}
 """
-        
         result = llm_manager.analyze(prompt, max_tokens=2000)
-        
+
         if result["success"]:
             texte = result["result"].strip()
             texte = texte.replace("```json", "").replace("```", "").strip()
@@ -48,7 +54,7 @@ Réponds UNIQUEMENT avec un objet JSON (sans markdown, sans ```json) :
         else:
             st.error(f"❌ Erreur extraction : {result['error']}")
             return None
-            
+
     except Exception as e:
         st.error(f"❌ Erreur parsing : {str(e)}")
         return None
@@ -61,7 +67,7 @@ def generer_offre_technique(exigences, projets_antecedents, user):
             f"- {p['nom_projet']} ({p['montant']}$, {p['duree_jours']} jours): {p['specifications']}"
             for p in projets_antecedents
         ]) if projets_antecedents else "Aucun projet antérieur."
-        
+
         prompt = f"""
 Génère une offre technique professionnelle en format JSON.
 
@@ -105,9 +111,8 @@ Réponds UNIQUEMENT avec un objet JSON (sans markdown) :
     "avantages_concurrentiels": ["avantage 1", "avantage 2"]
 }}
 """
-        
         result = llm_manager.analyze(prompt, max_tokens=3000)
-        
+
         if result["success"]:
             texte = result["result"].strip()
             texte = texte.replace("```json", "").replace("```", "").strip()
@@ -115,7 +120,7 @@ Réponds UNIQUEMENT avec un objet JSON (sans markdown) :
         else:
             st.error(f"❌ Erreur génération : {result['error']}")
             return None
-            
+
     except Exception as e:
         st.error(f"❌ Erreur : {str(e)}")
         return None
@@ -125,39 +130,38 @@ def calculer_offre_financiere(offre_technique, taux_horaire_base):
     """Génère une offre financière basée sur l'offre technique"""
     try:
         offre_financiere = {
-            "taux_horaire_base": taux_horaire_base,
+            "taux_horaire_base":  taux_horaire_base,
             "postes_budgetaires": [],
-            "total_heures": 0,
-            "total_ht": 0,
-            "taxes": 0,
-            "total_ttc": 0
+            "total_heures":       0,
+            "total_ht":           0,
+            "taxes":              0,
+            "total_ttc":          0
         }
-        
+
         for phase in offre_technique.get("approche_methodologique", {}).get("phases", []):
-            duree_text = phase.get("duree", "")
+            duree_text  = phase.get("duree", "")
             jours_match = re.search(r'(\d+)\s*jours?', duree_text.lower())
-            
+
             if jours_match:
-                jours = int(jours_match.group(1))
+                jours  = int(jours_match.group(1))
                 heures = jours * 8
-                cout = heures * taux_horaire_base
-                
+                cout   = heures * taux_horaire_base
+
                 offre_financiere["postes_budgetaires"].append({
-                    "description": phase.get("nom", "Phase"),
-                    "quantite": heures,
-                    "unite": "heures",
+                    "description":   phase.get("nom", "Phase"),
+                    "quantite":      heures,
+                    "unite":         "heures",
                     "prix_unitaire": taux_horaire_base,
-                    "total": cout
+                    "total":         cout
                 })
-                
                 offre_financiere["total_heures"] += heures
-                offre_financiere["total_ht"] += cout
-        
-        offre_financiere["taxes"] = offre_financiere["total_ht"] * 0.14975
+                offre_financiere["total_ht"]     += cout
+
+        offre_financiere["taxes"]     = offre_financiere["total_ht"] * 0.14975
         offre_financiere["total_ttc"] = offre_financiere["total_ht"] + offre_financiere["taxes"]
-        
+
         return offre_financiere
-        
+
     except Exception as e:
         st.error(f"❌ Erreur calcul financier : {str(e)}")
         return None
@@ -169,21 +173,21 @@ def valider_conformite_offre(offre_complete, exigences):
     Retourne la liste des problèmes SANS bloquer la progression.
     """
     conformite = {
-        "conforme": True,
+        "conforme":         True,
         "points_conformes": [],
         "points_manquants": [],
-        "recommandations": [],
+        "recommandations":  [],
         "score_conformite": 0
     }
-    
-    total_points = 0
+
+    total_points   = 0
     points_obtenus = 0
-    
-    # --- Vérification des livrables (30 pts) ---
+
+    # Livrables (30 pts)
     total_points += 30
     livrables_requis = set(exigences.get("livrables", []))
-    livrables_offre = set([l.get("nom", "") for l in offre_complete.get("offre_technique", {}).get("livrables", [])])
-    
+    livrables_offre  = set([l.get("nom", "") for l in offre_complete.get("offre_technique", {}).get("livrables", [])])
+
     if livrables_requis and livrables_requis.issubset(livrables_offre):
         conformite["points_conformes"].append("✅ Tous les livrables requis sont inclus")
         points_obtenus += 30
@@ -197,17 +201,17 @@ def valider_conformite_offre(offre_complete, exigences):
         else:
             points_obtenus += 30
             conformite["points_conformes"].append("✅ Livrables présents")
-    
-    # --- Vérification des exigences techniques (25 pts) ---
+
+    # Exigences techniques (25 pts)
     total_points += 25
     if exigences.get("exigences_techniques"):
-        offre_tech_text = json.dumps(offre_complete.get("offre_technique", {}), ensure_ascii=False).lower()
-        exigences_non_adressees = []
+        offre_tech_text          = json.dumps(offre_complete.get("offre_technique", {}), ensure_ascii=False).lower()
+        exigences_non_adressees  = []
         for exigence in exigences.get("exigences_techniques", []):
             mots_cles = exigence.lower().split()[:3]
             if not any(mot in offre_tech_text for mot in mots_cles if len(mot) > 4):
                 exigences_non_adressees.append(exigence)
-        
+
         if not exigences_non_adressees:
             conformite["points_conformes"].append("✅ Exigences techniques adressées")
             points_obtenus += 25
@@ -215,33 +219,33 @@ def valider_conformite_offre(offre_complete, exigences):
             conformite["points_manquants"].append(
                 f"⚠️ Exigences techniques à vérifier : {', '.join(exigences_non_adressees[:3])}"
             )
-            points_obtenus += 10  # Crédit partiel
+            points_obtenus += 10
     else:
         conformite["points_conformes"].append("✅ Aucune exigence technique spécifique requise")
         points_obtenus += 25
-    
-    # --- Vérification de l'équipe (20 pts) ---
+
+    # Équipe (20 pts)
     total_points += 20
     equipe = offre_complete.get("offre_technique", {}).get("equipe_proposee", [])
     if equipe and len(equipe) > 0:
         membres_incomplets = [m for m in equipe if not m.get("nom") or not m.get("role")]
         if membres_incomplets:
             conformite["points_manquants"].append(
-                f"⚠️ {len(membres_incomplets)} membre(s) de l'équipe avec informations incomplètes (nom ou rôle manquant)"
+                f"⚠️ {len(membres_incomplets)} membre(s) de l'équipe avec informations incomplètes"
             )
-            points_obtenus += 10  # Crédit partiel
+            points_obtenus += 10
         else:
             conformite["points_conformes"].append(f"✅ Équipe proposée : {len(equipe)} membre(s) défini(s)")
             points_obtenus += 20
     else:
         conformite["points_manquants"].append("⚠️ Aucun membre d'équipe défini dans l'offre technique")
-    
-    # --- Vérification de l'offre financière (25 pts) ---
+
+    # Offre financière (25 pts)
     total_points += 25
     offre_fin = offre_complete.get("offre_financiere", {})
     total_ttc = offre_fin.get("total_ttc", 0)
-    postes = offre_fin.get("postes_budgetaires", [])
-    
+    postes    = offre_fin.get("postes_budgetaires", [])
+
     if total_ttc > 0 and len(postes) > 0:
         conformite["points_conformes"].append(
             f"✅ Offre financière complète : {total_ttc:,.2f} $ TTC ({len(postes)} poste(s))"
@@ -252,67 +256,46 @@ def valider_conformite_offre(offre_complete, exigences):
         points_obtenus += 15
     else:
         conformite["points_manquants"].append("⚠️ Offre financière incomplète ou montant nul")
-    
-    # --- Calcul du score final ---
+
     conformite["score_conformite"] = int((points_obtenus / total_points) * 100) if total_points > 0 else 0
-    
-    # On marque non-conforme seulement si score < 50%, mais on ne bloque PAS
-    conformite["conforme"] = conformite["score_conformite"] >= 50
-    
-    # Recommandations
+    conformite["conforme"]         = conformite["score_conformite"] >= 50
+
     if conformite["points_manquants"]:
         conformite["recommandations"].append(
             "📋 Des points méritent attention (voir ci-dessus), mais vous pouvez soumettre quand même"
         )
     conformite["recommandations"].append("📋 Relisez attentivement l'offre avant envoi")
     conformite["recommandations"].append("📎 Vérifiez que tous les documents requis sont joints")
-    
+
     return conformite
 
 
-# ─────────────────────────────────────────────────────────────
-# CORRECTION PRINCIPALE : signature avec 4 arguments positionnels
-# ─────────────────────────────────────────────────────────────
 def sauvegarder_offre(entreprise_id, soumission_id, offre_complete, statut="brouillon"):
-    """
-    Sauvegarde l'offre dans la base de données.
-
-    Args:
-        entreprise_id : ID de l'entreprise
-        soumission_id : ID de la soumission
-        offre_complete : Contenu complet de l'offre (dict)
-        statut        : Statut de l'offre (défaut: "brouillon")
-
-    Returns:
-        dict: Données de l'offre sauvegardée ou None
-    """
+    """Sauvegarde l'offre dans la base de données."""
     try:
         database.apply_supabase_auth()
-        
+
         existing = database.supabase.table('offres').select("id").eq(
             'soumission_id', soumission_id
         ).execute()
-        
+
         data = {
             "entreprise_id": entreprise_id,
             "soumission_id": soumission_id,
-            "statut": statut,
-            "contenu": offre_complete,
-            "updated_at": datetime.now().isoformat()
+            "statut":        statut,
+            "contenu":       offre_complete,
+            "updated_at":    datetime.now().isoformat()
         }
-        
+
         if existing.data and len(existing.data) > 0:
             result = database.supabase.table('offres').update(data).eq(
                 'id', existing.data[0]['id']
             ).execute()
         else:
             result = database.supabase.table('offres').insert(data).execute()
-        
-        if result.data and len(result.data) > 0:
-            return result.data[0]
-        else:
-            return None
-            
+
+        return result.data[0] if result.data and len(result.data) > 0 else None
+
     except Exception as e:
         st.error(f"❌ Erreur sauvegarde : {str(e)}")
         import traceback
@@ -324,24 +307,21 @@ def mettre_a_jour_statut_offre(offre_id, nouveau_statut):
     """Met à jour le statut d'une offre"""
     try:
         database.apply_supabase_auth()
-        
         result = database.supabase.table('offres').update({
-            "statut": nouveau_statut,
+            "statut":     nouveau_statut,
             "updated_at": datetime.now().isoformat()
         }).eq('id', offre_id).execute()
-        
         return result.data[0] if result.data else None
-        
     except Exception as e:
         st.error(f"❌ Erreur mise à jour : {str(e)}")
         return None
 
 
 def generer_pdf_offre(offre_complete, user):
-    """Génère un PDF de l'offre"""
+    """Génère un texte formaté de l'offre (export texte)"""
     offre_tech = offre_complete.get('offre_technique', {})
-    offre_fin = offre_complete.get('offre_financiere', {})
-    
+    offre_fin  = offre_complete.get('offre_financiere', {})
+
     contenu = f"""
 ═══════════════════════════════════════════════════════════════
                     OFFRE DE SERVICES PROFESSIONNELS
@@ -356,8 +336,8 @@ INFORMATIONS ENTREPRISE
 Entreprise : {user.get('nom_entreprise')}
 Licence RBQ : {user.get('licence_rbq')}
 Contact : {user.get('contact_nom')}
-Email : {user.get('email')}
-Téléphone : {user.get('telephone')}
+Email : {user.get('contact_email', user.get('email', ''))}
+Téléphone : {user.get('contact_telephone', user.get('telephone', ''))}
 
 ───────────────────────────────────────────────────────────────
 1. INTRODUCTION
@@ -378,45 +358,29 @@ Téléphone : {user.get('telephone')}
 {offre_tech.get('approche_methodologique', {}).get('description', '')}
 
 PHASES DU PROJET :
-
 """
-    
+
     for i, phase in enumerate(offre_tech.get('approche_methodologique', {}).get('phases', []), 1):
-        contenu += f"""
-{i}. {phase.get('nom', '')} ({phase.get('duree', '')})
-   {phase.get('description', '')}
-"""
-    
-    contenu += """
-───────────────────────────────────────────────────────────────
-4. ÉQUIPE PROPOSÉE
-───────────────────────────────────────────────────────────────
+        contenu += f"\n{i}. {phase.get('nom', '')} ({phase.get('duree', '')})\n   {phase.get('description', '')}\n"
 
-"""
-    
+    contenu += "\n───────────────────────────────────────────────────────────────\n4. ÉQUIPE PROPOSÉE\n───────────────────────────────────────────────────────────────\n"
+
     for membre in offre_tech.get('equipe_proposee', []):
-        contenu += f"""
-- {membre.get('role', '')} : {membre.get('nom', '')}
-  Expérience : {membre.get('experience', '')}
-  Responsabilités : {', '.join(membre.get('responsabilites', []))}
+        contenu += (
+            f"\n- {membre.get('role', '')} : {membre.get('nom', '')}\n"
+            f"  Expérience : {membre.get('experience', '')}\n"
+            f"  Responsabilités : {', '.join(membre.get('responsabilites', []))}\n"
+        )
 
-"""
-    
-    contenu += """
-───────────────────────────────────────────────────────────────
-5. LIVRABLES
-───────────────────────────────────────────────────────────────
+    contenu += "\n───────────────────────────────────────────────────────────────\n5. LIVRABLES\n───────────────────────────────────────────────────────────────\n"
 
-"""
-    
     for livrable in offre_tech.get('livrables', []):
-        contenu += f"""
-- {livrable.get('nom', '')}
-  Description : {livrable.get('description', '')}
-  Format : {livrable.get('format', '')}
+        contenu += (
+            f"\n- {livrable.get('nom', '')}\n"
+            f"  Description : {livrable.get('description', '')}\n"
+            f"  Format : {livrable.get('format', '')}\n"
+        )
 
-"""
-    
     contenu += f"""
 ───────────────────────────────────────────────────────────────
 6. OFFRE FINANCIÈRE
@@ -425,28 +389,26 @@ PHASES DU PROJET :
 Taux horaire de base : {offre_fin.get('taux_horaire_base', 0)} $/h
 
 POSTES BUDGÉTAIRES :
-
 """
-    
+
     for poste in offre_fin.get('postes_budgetaires', []):
-        contenu += f"""
-- {poste.get('description', '')}
-  Quantité : {poste.get('quantite', 0)} {poste.get('unite', '')}
-  Prix unitaire : {poste.get('prix_unitaire', 0)} $
-  Total : {poste.get('total', 0):,.2f} $
+        contenu += (
+            f"\n- {poste.get('description', '')}\n"
+            f"  Quantité : {poste.get('quantite', 0)} {poste.get('unite', '')}\n"
+            f"  Prix unitaire : {poste.get('prix_unitaire', 0)} $\n"
+            f"  Total : {poste.get('total', 0):,.2f} $\n"
+        )
 
-"""
-    
     contenu += f"""
 ───────────────────────────────────────────────────────────────
 SOMMAIRE FINANCIER
 ───────────────────────────────────────────────────────────────
 
-Total heures : {offre_fin.get('total_heures', 0):.0f} h
-Sous-total HT : {offre_fin.get('total_ht', 0):,.2f} $
-Taxes (TPS+TVQ) : {offre_fin.get('taxes', 0):,.2f} $
+Total heures       : {offre_fin.get('total_heures', 0):.0f} h
+Sous-total HT      : {offre_fin.get('total_ht', 0):,.2f} $
+Taxes (TPS+TVQ)    : {offre_fin.get('taxes', 0):,.2f} $
 ─────────────────────────────────────────
-TOTAL TTC : {offre_fin.get('total_ttc', 0):,.2f} $
+TOTAL TTC          : {offre_fin.get('total_ttc', 0):,.2f} $
 ─────────────────────────────────────────
 
 Date : {datetime.now().strftime("%Y-%m-%d")}
@@ -456,5 +418,5 @@ Cordialement,
 
 ═══════════════════════════════════════════════════════════════
 """
-    
+
     return contenu
