@@ -8,13 +8,15 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Configuration Supabase
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
+SUPABASE_URL              = os.getenv("SUPABASE_URL")
+SUPABASE_ANON_KEY         = os.getenv("SUPABASE_ANON_KEY")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
-# Configuration LLM
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+# Configuration LLM — ordre de priorité : Gemini → Groq → Anthropic → OpenAI
+GEMINI_API_KEY    = os.getenv("GEMINI_API_KEY")
+GROQ_API_KEY      = os.getenv("GROQ_API_KEY")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+OPENAI_API_KEY    = os.getenv("OPENAI_API_KEY")
 
 # URLs
 MOKAFAD_LOGO_URL = "https://unhbihdenqzokxiednos.supabase.co/storage/v1/object/public/logos/logo-mokafad.png"
