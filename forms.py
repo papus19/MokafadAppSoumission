@@ -120,7 +120,7 @@ def profile_completion_form(user):
                         "nom_projet": nom,
                         "montant": montant,
                         "duree_jours": duree,
-                        "specifications": specs,
+                        "specifications": specs,    
                         "document": doc
                     })
         
